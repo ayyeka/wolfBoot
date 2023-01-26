@@ -29,7 +29,7 @@ endif
 
 ## ARM
 ifeq ($(ARCH),AARCH64)
-  CROSS_COMPILE:=aarch64-none-elf-
+  CROSS_COMPILE?=aarch64-none-elf-
   CFLAGS+=-DARCH_AARCH64 -march=armv8-a
   OBJS+=src/boot_aarch64.o src/boot_aarch64_start.o
   CFLAGS+=-DNO_QNX
@@ -39,7 +39,7 @@ ifeq ($(ARCH),AARCH64)
 endif
 
 ifeq ($(ARCH),ARM)
-  CROSS_COMPILE:=arm-none-eabi-
+  CROSS_COMPILE?=arm-none-eabi-
   CFLAGS+=-mthumb -mlittle-endian -mthumb-interwork -DARCH_ARM
   LDFLAGS+=-mthumb -mlittle-endian -mthumb-interwork
   OBJS+=src/boot_arm.o
@@ -57,7 +57,6 @@ ifeq ($(ARCH),ARM)
   ifeq ($(TARGET),stm32g0)
     CORTEX_M0=1
     ARCH_FLASH_OFFSET=0x08000000
-    WOLFBOOT_ORIGIN=$(ARCH_FLASH_OFFSET)
 
     # Enable this feature for secure memory support
     # Makes the flash sectors for the bootloader unacessible from the application
@@ -67,14 +66,12 @@ ifeq ($(ARCH),ARM)
 
   ifeq ($(TARGET),stm32f4)
     ARCH_FLASH_OFFSET=0x08000000
-    WOLFBOOT_ORIGIN=$(ARCH_FLASH_OFFSET)
     SPI_TARGET=stm32
   endif
 
   ifeq ($(TARGET),stm32l4)
     SPI_TARGET=stm32
     ARCH_FLASH_OFFSET=0x08000000
-    WOLFBOOT_ORIGIN=$(ARCH_FLASH_OFFSET)
     OBJS+=$(STM32CUBE)/Drivers/STM32L4xx_HAL_Driver/Src/stm32l4xx_hal_flash.o
     OBJS+=$(STM32CUBE)/Drivers/STM32L4xx_HAL_Driver/Src/stm32l4xx_hal_flash_ex.o
     CFLAGS+=-DSTM32L4A6xx -DUSE_HAL_DRIVER -Isrc -Ihal \
@@ -86,19 +83,16 @@ ifeq ($(ARCH),ARM)
 
   ifeq ($(TARGET),stm32f7)
     ARCH_FLASH_OFFSET=0x08000000
-    WOLFBOOT_ORIGIN=$(ARCH_FLASH_OFFSET)
     SPI_TARGET=stm32
   endif
 
   ifeq ($(TARGET),stm32h7)
     ARCH_FLASH_OFFSET=0x08000000
-    WOLFBOOT_ORIGIN=$(ARCH_FLASH_OFFSET)
     SPI_TARGET=stm32
   endif
 
   ifeq ($(TARGET),stm32wb)
     ARCH_FLASH_OFFSET=0x08000000
-    WOLFBOOT_ORIGIN=$(ARCH_FLASH_OFFSET)
     SPI_TARGET=stm32
     ifneq ($(PKA),0)
       PKA_EXTRA_OBJS+= $(STM32CUBE)/Drivers/STM32WBxx_HAL_Driver/Src/stm32wbxx_hal_pka.o  ./lib/wolfssl/wolfcrypt/src/port/st/stm32.o
@@ -131,6 +125,7 @@ ifeq ($(ARCH),ARM)
     else
       WOLFBOOT_ORIGIN=0x08000000
     endif
+    SPI_TARGET=stm32
   endif
 
   ## Cortex-M CPU
@@ -174,9 +169,13 @@ ifeq ($(ARCH),ARM)
 endif
 endif
 
+ifeq ($(TZEN),1)
+  CFLAGS+=-DTZEN
+endif
+
 ## RISCV
 ifeq ($(ARCH),RISCV)
-  CROSS_COMPILE:=riscv32-unknown-elf-
+  CROSS_COMPILE?=riscv32-unknown-elf-
   CFLAGS+=-fno-builtin-printf -DUSE_M_TIME -g -march=rv32imac -mabi=ilp32 -mcmodel=medany -nostartfiles -DARCH_RISCV
   LDFLAGS+=-march=rv32imac -mabi=ilp32 -mcmodel=medany
   MATH_OBJS += ./lib/wolfssl/wolfcrypt/src/sp_c32.o
@@ -191,10 +190,12 @@ endif
 
 # powerpc
 ifeq ($(ARCH),PPC)
-  CROSS_COMPILE:=powerpc-linux-gnu-
-  CFLAGS+=-fno-builtin-printf -DUSE_M_TIME -g -nostartfiles
+  CROSS_COMPILE?=powerpc-linux-gnu-
   LDFLAGS+=-Wl,--build-id=none
-  #MATH_OBJS += ./lib/wolfssl/wolfcrypt/src/sp_c32.o
+
+  ifeq ($(DEBUG_UART),0)
+    CFLAGS+=-fno-builtin-printf
+  endif
 
   # Prune unused functions and data
   CFLAGS +=-ffunction-sections -fdata-sections
@@ -257,6 +258,38 @@ ifeq ($(ARCH),ARM_BE)
   endif
 endif
 
+ifeq ($(TARGET),nxp_t2080)
+  # Power PC big endian
+  ARCH_FLAGS=-m32 -mhard-float -mcpu=e6500
+  CFLAGS+=$(ARCH_FLAGS) -DBIG_ENDIAN_ORDER
+  CFLAGS+=-DMMU -DWOLFBOOT_DUALBOOT
+  CFLAGS+=-pipe # use pipes instead of temp files
+  CFLAGS+=-feliminate-unused-debug-types
+  LDFLAGS+=$(ARCH_FLAGS)
+  LDFLAGS+=-Wl,--hash-style=both # generate both sysv and gnu symbol hash table
+  LDFLAGS+=-Wl,--as-needed # remove weak functions not used
+  UPDATE_OBJS:=src/update_ram.o
+  ifeq ($(SPMATH),1)
+    MATH_OBJS += ./lib/wolfssl/wolfcrypt/src/sp_c32.o
+  endif
+endif
+
+ifeq ($(TARGET),nxp_p1021)
+  # Power PC big endian
+  ARCH_FLAGS=-m32 -mhard-float -mcpu=e500mc
+  CFLAGS+=$(ARCH_FLAGS) -DBIG_ENDIAN_ORDER
+  CFLAGS+=-DWOLFBOOT_DUALBOOT
+  CFLAGS+=-pipe # use pipes instead of temp files
+  CFLAGS+=-feliminate-unused-debug-types
+  LDFLAGS+=$(ARCH_FLAGS)
+  LDFLAGS+=-Wl,--hash-style=both # generate both sysv and gnu symbol hash table
+  LDFLAGS+=-Wl,--as-needed # remove weak functions not used
+  UPDATE_OBJS:=src/update_ram.o
+  ifeq ($(SPMATH),1)
+    MATH_OBJS += ./lib/wolfssl/wolfcrypt/src/sp_c32.o
+  endif
+endif
+
 ifeq ($(TARGET),ti_hercules)
   # HALCoGen Source and Include?
   CORTEX_R5=1
@@ -267,7 +300,7 @@ ifeq ($(TARGET),ti_hercules)
   ifeq ($(CCS_ROOT),)
     $(error "CCS_ROOT must be defined to root of tools")
   endif
-  CROSS_COMPILE=$(CCS_ROOT)/bin/
+  CROSS_COMPILE?=$(CCS_ROOT)/bin/
 
   CC=$(CROSS_COMPILE)armcl
   LD=$(CROSS_COMPILE)armcl
@@ -351,6 +384,12 @@ ifeq ($(USE_GCC),1)
   OUTPUT_FLAG=-o
 endif
 
+ifneq ($(CROSS_COMPILE_PATH),)
+  # optional path for cross compiler includes
+  CFLAGS+=-I$(CROSS_COMPILE_PATH)/usr/include --sysroot=$(CROSS_COMPILE_PATH)
+  LDFLAGS+=-L$(CROSS_COMPILE_PATH)/usr/lib --sysroot=$(CROSS_COMPILE_PATH)
+endif
+
 
 ifeq ($(TARGET),x86_64_efi)
   USE_GCC_HEADLESS=0
@@ -393,9 +432,17 @@ ifeq ("$(UPDATE_OBJS)","")
   UPDATE_OBJS:=./src/update_flash.o
 endif
 
+## wolfBoot origin
+ifeq ($(WOLFBOOT_ORIGIN),)
+  WOLFBOOT_ORIGIN=$(ARCH_FLASH_OFFSET)
+endif
 
 ## Debug
 ifeq ($(DEBUG),1)
   WOLFCRYPT_OBJS+=./lib/wolfssl/wolfcrypt/src/logging.o
 endif
 
+# Debug UART
+ifeq ($(DEBUG_UART),1)
+  CFLAGS+=-DDEBUG_UART
+endif

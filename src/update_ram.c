@@ -33,12 +33,6 @@
 extern void hal_flash_dualbank_swap(void);
 extern int wolfBoot_get_dts_size(void *dts_addr);
 
-static inline void boot_panic(void)
-{
-    while(1)
-        ;
-}
-
 
 void RAMFUNCTION wolfBoot_start(void)
 {
@@ -52,38 +46,27 @@ void RAMFUNCTION wolfBoot_start(void)
 
 #ifdef WOLFBOOT_FIXED_PARTITIONS
     active = wolfBoot_dualboot_candidate();
-    if (active == PART_UPDATE)
+    if (active == PART_BOOT)
         load_address = (uint32_t*)WOLFBOOT_PARTITION_BOOT_ADDRESS;
     else
         load_address = (uint32_t*)WOLFBOOT_PARTITION_UPDATE_ADDRESS;
 #else
     active = wolfBoot_dualboot_candidate_addr((void**)&load_address);
 #endif
-    if (active < 0) /* panic if no images available */
+
+    wolfBoot_printf("Part: Active %d, Address %x\n", active, load_address);
+
+    if (active < 0) { /* panic if no images available */
         wolfBoot_panic();
-
-
-    #ifdef WOLFBOOT_FIXED_PARTITIONS
-    /* Check current status for failure (image still in TESTING), and fall-back
-     * if an alternative is available
-     */
-    if (wolfBoot_fallback_is_possible() &&
-            (wolfBoot_get_partition_state(active, &p_state) == 0) &&
-            (p_state == IMG_STATE_TESTING))
-    {
-        active ^= 1; /* switch to other partition if available */
     }
-    #endif
 
-    wolfBoot_printf("Active Partition: %c\n", active?'B':'A');
-    wolfBoot_printf("Active Partition start address: %x\n", load_address);
     for (;;) {
         if (((ret = wolfBoot_open_image_address(&os_image, (uint8_t*)load_address)) < 0) ||
             ((ret = wolfBoot_verify_integrity(&os_image) < 0)) ||
             ((ret = wolfBoot_verify_authenticity(&os_image)) < 0)) {
 
-        wolfBoot_printf("Failure %d: Part %d, Hdr %d, Hash %d, Sig %d\n", ret,
-            active, os_image.hdr_ok, os_image.sha_ok, os_image.signature_ok);
+            wolfBoot_printf("Failure %d: Part %d, Hdr %d, Hash %d, Sig %d\n", ret,
+                active, os_image.hdr_ok, os_image.sha_ok, os_image.signature_ok);
 
             /* panic if authentication fails and no backup */
             if (!wolfBoot_fallback_is_possible())
@@ -141,7 +124,7 @@ void RAMFUNCTION wolfBoot_start(void)
     /* Load DTS to RAM */
     if (PART_IS_EXT(&os_image) &&
         wolfBoot_open_image(&os_image, PART_DTS_BOOT) >= 0) {
-        dts_buf = (uint32_t*)WOLFBOOT_LOAD_DTS_ADDRESS;
+        dts_buf = (uint8_t*)WOLFBOOT_LOAD_DTS_ADDRESS;
         dts_size = (uint32_t)os_image.fw_size;
 
         wolfBoot_printf("Loading DTS (size %lu) to RAM at %08lx\n",
@@ -153,8 +136,21 @@ void RAMFUNCTION wolfBoot_start(void)
 #else
     wolfBoot_printf("Loading %d bytes to RAM at %08lx\n", os_image.fw_size,
             (WOLFBOOT_LOAD_ADDRESS));
+
+#ifdef __GNUC__
+    /* WOLFBOOT_LOAD_ADDRESS can be 0 address,
+     * so don't warn on use of NULL for memcpy */
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wnonnull"
+#endif
+
     memcpy((void*)WOLFBOOT_LOAD_ADDRESS, os_image.fw_base, os_image.fw_size);
-  #ifdef MMU
+
+#ifdef __GNUC__
+    #pragma GCC diagnostic pop
+#endif
+
+#ifdef MMU
     dts_buf = hal_get_dts_address();
     if (dts_buf) {
         ret = wolfBoot_get_dts_size(dts_buf);
@@ -167,7 +163,7 @@ void RAMFUNCTION wolfBoot_start(void)
             memcpy((void*)WOLFBOOT_LOAD_DTS_ADDRESS, dts_buf, dts_size);
         }
     }
-  #endif /* MMU */
+#endif /* MMU */
 
 #endif /* WOLFBOOT_FIXED_PARTITIONS */
     wolfBoot_printf("Booting at %08lx\n", WOLFBOOT_LOAD_ADDRESS);

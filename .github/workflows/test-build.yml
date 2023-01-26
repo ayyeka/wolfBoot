@@ -1,0 +1,49 @@
+name: Wolfboot Reusable Build Workflow
+
+on:
+
+  workflow_call:
+    inputs:
+      arch:
+        required: true
+        type: string
+      config-file:
+        required: true
+        type: string
+      make-args:
+        required: false
+        type: string
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+
+      - name: Install cross compilers
+        run: |
+          sudo apt-get install -y gcc-arm-none-eabi gcc-aarch64-linux-gnu gcc-powerpc-linux-gnu gnu-efi
+
+      - name: make clean
+        run: |
+          make keysclean && make -C tools/keytools clean && rm -f include/target.h
+
+      - name: Install wolfSSL
+        run: |
+          sudo apt-get install --no-install-recommends -y -q make libwolfssl-dev
+
+      - name: Select config
+        run: |
+          cp ${{inputs.config-file}} .config && make include/target.h
+
+      - name: Build key tools
+        run: |
+          make -C tools/keytools
+
+      - name: Build wolfboot
+        run: |
+          make ${{inputs.make-args}}

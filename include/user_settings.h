@@ -64,13 +64,13 @@
 #endif
 
 /* ECC and SHA256 */
-#if defined (WOLFBOOT_SIGN_ECC256) ||\
-    defined (WOLFBOOT_SIGN_ECC384) ||\
-    defined (WOLFBOOT_SIGN_ECC521)
+#if defined(WOLFBOOT_SIGN_ECC256) ||\
+    defined(WOLFBOOT_SIGN_ECC384) ||\
+    defined(WOLFBOOT_SIGN_ECC521)
+
 #   define HAVE_ECC
 #   define ECC_TIMING_RESISTANT
-
-
+#   define ECC_USER_CURVES /* enables only 256-bit by default */
 
 /* Kinetis LTC support */
 #   ifdef FREESCALE_USE_LTC
@@ -88,6 +88,11 @@
 #       define WOLFSSL_SP_SMALL
 #       define SP_WORD_SIZE 32
 #       define WOLFSSL_HAVE_SP_ECC
+
+        /* SP Math needs to understand long long */
+#       ifndef ULLONG_MAX
+#           define ULLONG_MAX 18446744073709551615ULL
+#       endif
 #   endif
 
 /* ECC options disabled to reduce size */
@@ -97,25 +102,25 @@
 #   define NO_ECC_KEY_EXPORT
 
 /* Curve */
-#   define NO_ECC192
-#   define NO_ECC224
 #ifdef WOLFBOOT_SIGN_ECC256
 #   define HAVE_ECC256
 #   define FP_MAX_BITS (256 + 32)
-#   define NO_ECC384
-#   define NO_ECC521
-#elif defined WOLFBOOT_SIGN_ECC384
+#elif defined(WOLFBOOT_SIGN_ECC384)
 #   define HAVE_ECC384
-#   define FP_MAX_BITS (1024 + 32)
-#   define WOLFSSL_SP_384
-#   define WOLFSSL_SP_NO_256
+#   define FP_MAX_BITS (384 * 2)
+#   ifndef USE_FAST_MATH
+#       define WOLFSSL_SP_384
+#       define WOLFSSL_SP_NO_256
+#   endif
 #   define NO_ECC256
-#   define NO_ECC521
-#elif defined WOLFBOOT_SIGN_ECC521
+#elif defined(WOLFBOOT_SIGN_ECC521)
 #   define HAVE_ECC521
-#   define FP_MAX_BITS (544 + 32)
+#   define FP_MAX_BITS (528 * 2)
+#   ifndef USE_FAST_MATH
+#       define WOLFSSL_SP_521
+#       define WOLFSSL_SP_NO_256
+#   endif
 #   define NO_ECC256
-#   define NO_ECC384
 #endif
 
 #   define NO_RSA
@@ -138,6 +143,7 @@
 #       define WOLFSSL_SP_NO_3072
 #       define WOLFSSL_SP_NO_4096
 #   endif
+#   define WC_ASN_HASH_SHA256
 #endif
 
 #ifdef WOLFBOOT_SIGN_RSA3072
@@ -156,6 +162,7 @@
 #       define WOLFSSL_SP_NO_2048
 #       define WOLFSSL_SP_NO_4096
 #   endif
+#   define WC_ASN_HASH_SHA256
 #endif
 
 #ifdef WOLFBOOT_SIGN_RSA4096
@@ -175,16 +182,21 @@
 #       define WOLFSSL_SP_NO_2048
 #       define WOLFSSL_SP_NO_3072
 #   endif
+#   define WC_ASN_HASH_SHA256
 #endif
 
 #ifdef WOLFBOOT_HASH_SHA3_384
 #   define WOLFSSL_SHA3
-#   define NO_SHA256
+#   ifdef NO_RSA
+#       define NO_SHA256
+#   endif
 #endif
 
 #ifdef WOLFBOOT_HASH_SHA384
 #   define WOLFSSL_SHA384
-#   define NO_SHA256
+#   ifdef NO_RSA
+#       define NO_SHA256
+#   endif
 #endif
 
 #ifdef EXT_ENCRYPTED
@@ -249,6 +261,5 @@
 #else
 #   define WOLFSSL_SMALL_STACK
 #endif
-
 
 #endif /* !H_USER_SETTINGS_ */

@@ -1,6 +1,6 @@
 /* boot_ppc_start.S
  *
- * Copyright (C) 2021 wolfSSL Inc.
+ * Copyright (C) 2022 wolfSSL Inc.
  *
  * This file is part of wolfBoot.
  *
@@ -53,12 +53,20 @@ CRM chapter 11
 * Set up L1 TLB and stack
 
 ## Address space considerations
+Address Space (AS) == Translation Space (TS)
+
+This also corresponds to the MSR register IS and DS values.
+
+TLB 1 is fully associative and allows different size pages.
+TLB 0 is not fully and only allow 4KB page size, but has many more
+
+All TLBs for boot will be in TLB1 and supervisor mode (not user)
 
 ### 7.5.2.1 Address Space (AS) Value
 Address spaces require different TLB entries
 
 ### CCSR
-T2080RM - -CCSR needs to not be overlapped with flash space
+T2080RM - CCSR needs to not be overlapped with flash space
 4.3.1.1 Updating CCSRBARs
 
 Also see MPC8544ERM
@@ -69,13 +77,16 @@ Also see MPC8544ERM
 .global _reset
 
 _reset:
-        /* CRM 9.9.2 and EREF 10.4 enable debug interrupt */
+
 #if defined(DEBUG)
+        /* CRM 9.9.2 and EREF 10.4 enable debug interrupt */
         li      1, (1<<9)
         mtmsr   1
 #endif
+
 setup_interrupts:
 
+/* MMU Assist Registers */
 #define MAS0     0x270
 #define MAS1     0x271
 #define MAS2     0x272
@@ -87,21 +98,22 @@ setup_interrupts:
 
 /* CRM 11.6 and 6.7 */
 setup_mmu:
+
         /* TLBs
          * for CCSR default
-         * tlb 0, entry 0
+         * tlb 1, entry 1
          */
-        xor     3, 3, 3
+        lis     3, 0x1001
         mtspr   MAS0, 3
-        /* V and 1M */
-        lis     3, 0x8000
-        ori     3, 3, (10<<7)
+        /* V, TS=1, iprotect, and 16M */
+        lis     3, 0xC000
+        ori     3, 3, (1<<12)|(14<<7)
         mtspr   MAS1, 3
         /* epn wimg(I|G) */
         lis     3, 0xfe00
         ori     3, 3, 0x000a
         mtspr   MAS2, 3
-        /* rpn permisisons (super W+R) */
+        /* rpn permissions(super W,R) */
         lis     3, 0xfe00
         ori     3, 3, 0x0005
         mtspr   MAS3, 3
@@ -113,39 +125,16 @@ setup_mmu:
         tlbwe
         isync
 
-        /* TLBs
-         * for CCSR default
-         * tlb 1, entry 13
+        /* For TS/AS=1 map all 8M of boot ROM
+         * This window is always enabled T2080 RM (See LAW 2.3.5)
          */
-        lis     3, 0x100d
-        mtspr   MAS0, 3
-        /* V, ts, and 16M */
-        lis     3, 0x8000
-        ori     3, 3, (14<<7)|(1<<12)
-        mtspr   MAS1, 3
-        /* epn wimg(I|G) */
-        lis     3, 0xfe00
-        ori     3, 3, 0x000a
-        mtspr   MAS2, 3
-        /* rpn permisisons(user W,R) */
-        lis     3, 0xfe00
-        ori     3, 3, 0x0005
-        mtspr   MAS3, 3
-        /* upper rpn */
-        li     3, 0x0000
-        mtspr   MAS7, 3
-        isync
-        msync
-        tlbwe
-        isync
-
 flash_tlb:
         /* flash code
-         * tlb 1, entry 15
+         * tlb 1, entry 3
          */
-        lis     3, 0x100f
+        lis     3, 0x1003
         mtspr   MAS0, 3
-        /* V, iprotect, TS, and 8M */
+        /* V, TS=1, iprotect, and 8M */
         lis     3, 0xC000
         ori     3, 3, (1<<12)|(13<<7)
         mtspr   MAS1, 3
@@ -153,7 +142,7 @@ flash_tlb:
         lis     3, 0xef80
         ori     3, 3, 0x000a
         mtspr   MAS2, 3
-        /* rpn permisisons */
+        /* rpn permissions (super X,W,R) */
         lis     3, 0xff80
         ori     3, 3, 0x0015
         mtspr   MAS3, 3
@@ -165,9 +154,10 @@ flash_tlb:
         tlbwe
         isync
 
+
 create_ccsr_l2_tlb:
-        /* tlb 0 entry 2 */
-        lis     3,2
+        /* tlb 1, entry 5 */
+        lis     3,0x1005
         ori     3,3,0
         mtspr   MAS0,3
         /* V 4K */
@@ -279,7 +269,7 @@ enable_l1_data:
         ori     5,5,0x0001 /*  CE */
         sync
         isync            /* synchronize setting of L1CS0 */
-        mtspr L1CSR0,5  /* enaable L1 data cache */
+        mtspr L1CSR0,5   /* enable L1 data cache */
         isync            /* synchronize setting of L1CS0 */
 data_en_loop:
         mfspr 4,L1CSR0  /* get current value */
@@ -304,19 +294,44 @@ i_enable_loop:
 
 stack_tlb:
         /* stack
-         * tlb 1, entry 14
+         * tlb 1, entry 6
          */
-        lis     3, 0x100e
+        lis     3, 0x1006
         mtspr   MAS0, 3
-        /* V, iprotect, TS, and 16k */
+        /* V, TS=1, iprotect, and 16k */
         lis     3, 0xC000
-        ori     3, 3, (4<<7)|(1<<12)
+        ori     3, 3, (1<<12)|(4<<7)
         mtspr   MAS1, 3
         /* epn wimg */
         lis     3, 0xfdd0
         ori     3, 3, 0x0000
         mtspr   MAS2, 3
-        /* rpn permisisons rpn=0xf_fe03_c000 */
+        /* rpn permissions rpn=0xf_fe03_c000 */
+        lis     3, 0xfe03
+        ori     3, 3, 0xc015
+        mtspr   MAS3, 3
+        /* upper rpn */
+        li     3, 0xf
+        mtspr   MAS7, 3
+        isync
+        msync
+        tlbwe
+        isync
+
+        /* stack
+         * tlb 1, entry 7
+         */
+        lis     3, 0x1007
+        mtspr   MAS0, 3
+        /* V, iprotect, and 16k */
+        lis     3, 0xC000
+        ori     3, 3, (4<<7)
+        mtspr   MAS1, 3
+        /* epn wimg */
+        lis     3, 0xfdd0
+        ori     3, 3, 0x0000
+        mtspr   MAS2, 3
+        /* rpn permissions rpn=0xf_fe03_c000 */
         lis     3, 0xfe03
         ori     3, 3, 0xc015
         mtspr   MAS3, 3
@@ -344,6 +359,8 @@ set_stack_as:
 #define MSR_IS          (1<<5)  /* Book E Instruction space */
 #define MSR_DS          (1<<4)  /* Book E Data space */
 #define MSR_DE          (1<<9)  /* Debug Exception Enable */
+//#define MSR_CE
+//#define MSR_ME
 
         lis     6, MSR_IS|MSR_DS|MSR_DE@h
         ori     6, 6, MSR_IS|MSR_DS|MSR_DE@l
@@ -353,7 +370,7 @@ set_stack_as:
         mtspr   SPRN_SRR0,7
         mtspr   SPRN_SRR1,6
 
-        /* retrun from interrupt call, switches to AS=1 */
+        /* return from interrupt call and switch to AS=1 (aka TS=1) */
         rfi
 
 switch_as:
@@ -372,6 +389,86 @@ ram_q:
         dcbtls  0, 0, 3
         addi    3,3, 64 /* CONFIG_SYS_CACHELINE_SIZE */
         bdnz    1b
+
+        /* Set up LAW to map IFC(flash) to 0xf_e800_0000
+         * This must be in place along with TLB before switching back to AS/TS=0
+         */
+        bl      law_init
+
+        /* TLBs
+         * for CCSR TS=0
+         * tlb 1, entry 2
+         */
+        lis     3, 0x1002
+        mtspr   MAS0, 3
+        /* V, iprotect, and 16M */
+        lis     3, 0xC000
+        ori     3, 3, (14<<7)
+        mtspr   MAS1, 3
+        /* epn wimg(I|G) */
+        lis     3, 0xfe00
+        ori     3, 3, 0x000a
+        mtspr   MAS2, 3
+        /* rpn permissions(super W,R) */
+        lis     3, 0xfe00
+        ori     3, 3, 0x0005
+        mtspr   MAS3, 3
+        /* upper rpn */
+        li     3, 0x0000
+        mtspr   MAS7, 3
+        isync
+        msync
+        tlbwe
+        isync
+
+        /* flash start overwrite default first page
+         * tlb 1, entry 0
+         */
+        lis     3, 0x1000
+        mtspr   MAS0, 3
+        /* V, iprotect, and 256M */
+        lis     3, 0xC000
+        ori     3, 3, (18<<7)
+        mtspr   MAS1, 3
+        /* epn wimg(*I*G) */
+        lis     3, 0xe000
+        ori     3, 3, 0x000a
+        mtspr   MAS2, 3
+        /* rpn permissions (super X,W,R) */
+        lis     3, 0xe000
+        ori     3, 3, 0x0015
+        mtspr   MAS3, 3
+        /* upper rpn */
+        li      3, 0xf
+        mtspr   MAS7, 3
+        isync
+        msync
+        tlbwe
+        isync
+
+
+        /* enable branch prediction */
+#define BUCSR         0x3F5      /* Branch Control and Status Register */
+#define BUCSR_STAC_EN 0x01000000 /* Segment target addr cache enable */
+#define BUCSR_LS_EN   0x00400000 /* Link stack enable */
+#define BUCSR_BBFI    0x00000200 /* Branch buffer flash invalidate */
+#define BUCSR_BPEN    0x00000001 /* Branch prediction enable */
+#define BUCSR_ENABLE (BUCSR_STAC_EN | BUCSR_LS_EN | BUCSR_BBFI | BUCSR_BPEN)
+        lis     0, (BUCSR_ENABLE)@h
+        ori     0, 0, (BUCSR_ENABLE)@l
+        mtspr   BUCSR, 0
+
+        /* time base enable */
+        lis     4, 0x0000
+        ori     4, 4, 0x4000
+        mtspr   0x3F0, 4
+
+        /* switch back to AS/TS=0 */
+        lis     3,(MSR_DE)@h
+        ori     3,3,(MSR_DE)@l
+        mtmsr   3
+        isync
+
 
         /* PowerPC e500 Application Binary Interface User’s Guide
          * 2.3.5.1.1 Minimal Stack Frame: No Local Variables or Saved Parameters

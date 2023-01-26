@@ -114,5 +114,9 @@ IDE/IAR/Release
 
 # Simulated Flash files
 *.dd
-
+# hal implementations
 hal/*
+# CMake
+build/
+CMakeFiles/
+CMakeCache.txt

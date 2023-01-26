@@ -38,7 +38,7 @@ sign="ed25519"
 
 
 def usage():
-    print("Usage: %s [--ed25519 | --ed448 | --ecc256 | --ecc384 | --ecc521 | --rsa2048| --rsa3072 | --rsa4096] [ --force ] [-i pubkey0.der [-i pubkey1.der -i pubkey2.der ... -i pubkeyN.der]] [-i pubkey0.der [-i pubkey1.der -i pubkey2.der ... -i pubkeyN.der]]n" % sys.argv[0])
+    print("Usage: %s [--ed25519 | --ed448 | --ecc256 | --ecc384 | --ecc521 | --rsa2048| --rsa3072 | --rsa4096] [ --force ] [-i pubkey0.der [-i pubkey1.der -i pubkey2.der ... -i pubkeyN.der]] [-i pubkey0.der [-i pubkey1.der -i pubkey2.der ... -i pubkeyN.der] [-keystoreDir dir]]n" % sys.argv[0])
     parser.print_help()
     sys.exit(1)
 
@@ -85,6 +85,26 @@ def sign_key_size(name):
         return 'KEYSTORE_PUBKEY_SIZE_RSA3072'
     elif name == 'rsa4096':
         return 'KEYSTORE_PUBKEY_SIZE_RSA4096'
+    else:
+        return 0
+
+def sign_key_size_literal(name):
+    if name == 'ed25519':
+        return 32
+    elif name == 'ed448':
+        return 57
+    elif name == 'ecc256':
+        return 64
+    elif name == 'ecc384':
+        return 96
+    elif name == 'ecc521':
+        return 132
+    elif name == 'rsa2048':
+        return 320
+    elif name == 'rsa3072':
+        return 448
+    elif name == 'rsa4096':
+        return 576
     else:
         return 0
 
@@ -172,14 +192,20 @@ parser.add_argument('--rsa4096', dest='rsa4096', action='store_true')
 parser.add_argument('--force', dest='force', action='store_true')
 parser.add_argument('-i', dest='pubfile', nargs='+', action='extend')
 parser.add_argument('-g', dest='keyfile', nargs='+', action='extend')
+parser.add_argument('-keystoreDir', dest='storeDir', nargs='+', action='extend')
 
 
 args=parser.parse_args()
 
 #sys.exit(0) #test
 
-pubkey_cfile = "src/keystore.c"
-keystore_imgfile = "keystore.der"
+if (type(args.storeDir) == list):
+    pubkey_cfile = "".join(args.storeDir)+"/keystore.c"
+    keystore_imgfile =  "".join(args.storeDir)+"/keystore.der"
+else:
+    pubkey_cfile = "src/keystore.c"
+    keystore_imgfile = "keystore.der"
+    
 key_files = args.keyfile
 pubkey_files = args.pubfile
 
@@ -256,6 +282,12 @@ if pubkey_files != None:
         print ("Input public key:     " + key_file)
         with open(key_file, 'rb') as f:
             key = f.read(4096)
+            # if it's an ecc key and it's length is longer than the raw key we
+            # need to parse it
+            if (sign == 'ecc256' or sign == 'ecc384' or sign == 'ecc521') and len(key) > sign_key_size_literal(sign):
+                eccKey = ciphers.EccPublic(key)
+                key = eccKey.encode_key_raw()
+                key = key[0] + key[1]
             keystore_add(pub_slot_index, key)
     pub_slot_index = len(pubkey_files)
 

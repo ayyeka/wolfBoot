@@ -24,6 +24,7 @@
 #include "hal.h"
 #include "spi_drv.h"
 #include <stddef.h>
+#include "printf.h"
 
 #include <wolfssl/wolfcrypt/settings.h>
 #include <string.h>
@@ -692,14 +693,14 @@ static int TPM2_IoCb(TPM2_CTX* ctx, const byte* txBuf, byte* rxBuf,
     (void)userCtx;
     (void)ctx;
     word16 i;
-    spi_cs_on(SPI_CS_TPM);
+    spi_cs_on(SPI_CS_TPM_PIO_BASE, SPI_CS_TPM);
     memset(rxBuf, 0, xferSz);
     for (i = 0; i < xferSz; i++)
     {
         spi_write(txBuf[i]);
         rxBuf[i] = spi_read();
     }
-    spi_cs_off(SPI_CS_TPM);
+    spi_cs_off(SPI_CS_TPM_PIO_BASE, SPI_CS_TPM);
     /*
     printf("\r\nSPI TX: ");
     printbin(txBuf, xferSz);
@@ -785,22 +786,29 @@ uint32_t wolfBoot_image_size(uint8_t *image)
 
 int wolfBoot_open_image_address(struct wolfBoot_image* img, uint8_t* image)
 {
-    uint32_t *magic;
-
-
-    magic = (uint32_t *)(image);
-    if (*magic != WOLFBOOT_MAGIC)
+    uint32_t *magic = (uint32_t *)(image);
+    if (*magic != WOLFBOOT_MAGIC) {
+        wolfBoot_printf("Boot header magic 0x%08x invalid at %p\n",
+            *magic, image);
         return -1;
+    }
     img->fw_size = wolfBoot_image_size(image);
+    wolfBoot_printf("Image size %d\n", img->fw_size);
 #ifdef WOLFBOOT_FIXED_PARTITIONS
     if (img->fw_size > (WOLFBOOT_PARTITION_SIZE - IMAGE_HEADER_SIZE)) {
+        wolfBoot_printf("Image size %d > max %d\n",
+            img->fw_size, (WOLFBOOT_PARTITION_SIZE - IMAGE_HEADER_SIZE));
         img->fw_size = 0;
         return -1;
     }
+    if (!img->hdr_ok) {
+        img->hdr = image;
+    }
     img->trailer = img->hdr + WOLFBOOT_PARTITION_SIZE;
 #else
-    /* This function was called directly, img->hdr is not yet set */
-    img->hdr = image;
+    if (img->hdr == NULL) {
+        img->hdr = image;
+    }
 #endif
     img->hdr_ok = 1;
     img->fw_base = img->hdr + IMAGE_HEADER_SIZE;
@@ -809,8 +817,13 @@ int wolfBoot_open_image_address(struct wolfBoot_image* img, uint8_t* image)
 }
 
 #ifdef MMU
-/* misc.c included via libwolfboot.c */
-extern uint32_t wb_reverse_word32(uint32_t);
+/* Inline use of ByteReverseWord32 */
+#define WOLFSSL_MISC_INCLUDED
+#include <wolfcrypt/src/misc.c>
+static uint32_t wb_reverse_word32(uint32_t x)
+{
+    return ByteReverseWord32(x);
+}
 
 int wolfBoot_get_dts_size(void *dts_addr)
 {
@@ -850,8 +863,8 @@ int wolfBoot_open_image(struct wolfBoot_image *img, uint8_t part)
     memset(img, 0, sizeof(struct wolfBoot_image));
     img->part = part;
     if (part == PART_SWAP) {
-        img->hdr_ok = 1;
         img->hdr = (void*)WOLFBOOT_PARTITION_SWAP_ADDRESS;
+        img->hdr_ok = 1;
         img->fw_base = img->hdr;
         img->fw_size = WOLFBOOT_SECTOR_SIZE;
         return 0;
@@ -859,6 +872,8 @@ int wolfBoot_open_image(struct wolfBoot_image *img, uint8_t part)
 #ifdef MMU
     if (part == PART_DTS_BOOT || part == PART_DTS_UPDATE) {
         img->hdr = (void *)WOLFBOOT_LOAD_DTS_ADDRESS;
+        wolfBoot_printf("%s partition: %p\n",
+            (part == PART_DTS_BOOT) ? "DTB boot" : "DTB update", img->hdr);
         if (PART_IS_EXT(img))
             image = fetch_hdr_cpy(img);
         else
@@ -874,10 +889,15 @@ int wolfBoot_open_image(struct wolfBoot_image *img, uint8_t part)
 #endif
     if (part == PART_BOOT) {
         img->hdr = (void*)WOLFBOOT_PARTITION_BOOT_ADDRESS;
-    } else if (part == PART_UPDATE) {
+        wolfBoot_printf("Boot partition: %p\n", img->hdr);
+    }
+    else if (part == PART_UPDATE) {
         img->hdr = (void*)WOLFBOOT_PARTITION_UPDATE_ADDRESS;
-    } else
+        wolfBoot_printf("Update partition: %p\n", img->hdr);
+    }
+    else {
         return -1;
+    }
 
     /* fetch header address
      * (or copy from external device to a local buffer via fetch_hdr_cpy)
@@ -886,6 +906,7 @@ int wolfBoot_open_image(struct wolfBoot_image *img, uint8_t part)
         image = fetch_hdr_cpy(img);
     else
         image = (uint8_t *)img->hdr;
+    img->hdr_ok = 1;
 
     return wolfBoot_open_image_address(img, image);
 }
