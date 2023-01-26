@@ -430,6 +430,9 @@ static int RAMFUNCTION wolfBoot_update(int fallback_allowed)
      * If something goes wrong, the operation will be resumed upon reboot.
      */
     while ((sector * sector_size) < total_size) {
+        char tmp[30];
+        sprintf(tmp, "swapping sector (%d / %d)",sector, total_size / sector_size);
+        wolfboot_trace(tmp);
         if ((wolfBoot_get_update_sector_flag(sector, &flag) != 0) || (flag == SECT_FLAG_NEW)) {
            flag = SECT_FLAG_SWAPPING;
            wolfBoot_copy_sector(&update, &swap, sector);
@@ -513,17 +516,21 @@ void RAMFUNCTION wolfBoot_start(void)
      */
     if ((wolfBoot_get_partition_state(PART_BOOT, &st) == 0) && (st == IMG_STATE_TESTING)) {
         wolfBoot_update_trigger();
+        wolfboot_trace("Wolfboot: BOOT partition in state TESTING, Performing fallback");
         wolfBoot_update(1);
     } else if ((wolfBoot_get_partition_state(PART_UPDATE, &st) == 0) && (st == IMG_STATE_UPDATING)) {
     /* Check for new updates in the UPDATE partition */
+        wolfboot_trace("Wolfboot: BOOT partition in state UPDATING, performing update");
         wolfBoot_update(0);
     }
     if ((wolfBoot_open_image(&boot, PART_BOOT) < 0)
             || (wolfBoot_verify_integrity(&boot) < 0)
             || (wolfBoot_verify_authenticity(&boot) < 0)
             ) {
+        wolfboot_trace("Invalid image in boot partition, performing emergency update");
         if (likely(wolfBoot_update(1) < 0)) {
             /* panic: no boot option available. */
+            wolfboot_trace("Wolfboot: panic - no boot option available");
             wolfBoot_panic();
         } else {
             /* Emergency update successful, try to re-open boot image */
@@ -531,11 +538,13 @@ void RAMFUNCTION wolfBoot_start(void)
                     (wolfBoot_verify_integrity(&boot) < 0)  ||
                     (wolfBoot_verify_authenticity(&boot) < 0)))) {
                 /* panic: something went wrong after the emergency update */
+                wolfboot_trace("Wolfboot: Emergency update failed");
                 wolfBoot_panic();
             }
         }
     }
     PART_SANITY_CHECK(&boot);
+    wolfboot_trace("Booting firmware...");
     hal_prepare_boot();
     do_boot((void *)boot.fw_base);
 }

@@ -80,5 +80,9 @@ void hal_prepare_boot(void);
         return 0;
     }
 #endif /* !SPI_FLASH */
-
+#ifdef WOLFBOOT_TRACE
+void wolfboot_trace(const char *s);
+#else
+#define wolfboot_trace(X) (X)
+#endif
 #endif /* H_HAL_FLASH_ */
